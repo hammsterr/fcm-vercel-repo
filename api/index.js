@@ -121,8 +121,6 @@ app.post('/api/send-call', async (req, res) => {
         return res.status(500).json({
             error: 'Server Configuration Error',
             message: 'Server not ready: Firebase Admin SDK initialization failed',
-            // Не раскрываем детали ошибки в production
-            // details: process.env.NODE_ENV === 'development' ? initError.message : undefined
         });
     }
 
@@ -154,31 +152,37 @@ app.post('/api/send-call', async (req, res) => {
     }
 
     // 5. Construct FCM message payload according to FCM HTTP v1 API
+    // ВАЖНО: Добавляем и `notification` и `data` поля для работы в фоне и на переднем плане
     const message = {
         token: fcmToken,
-        data: {
+        data: { // Data payload для обработки в приложении
             type: 'call',
             channel_name: channelName,
             caller_id: callerId,
             is_video: isVideoCall.toString(),
             timestamp: Date.now().toString()
         },
-        notification: {
+        notification: { // Notification payload для системного уведомления
             title: 'Входящий звонок',
             body: isVideoCall ? 'Видеовызов' : 'Аудиовызов'
         },
         android: {
             priority: 'high',
             notification: {
-                channelId: 'calls', // Must be created in the Android app
-                // sound: 'default' // Optional: Add sound
+                channelId: 'calls', // Должен быть создан в Android-приложении
+                sound: 'default',   // Звук уведомления
+                // icon: 'ic_call'   // Можно добавить иконку (drawable/ic_call)
             }
         },
-        apns: {
+        apns: { // Для iOS
             payload: {
                 aps: {
-                    'content-available': 1, // Background notification for iOS
-                    'mutable-content': 1
+                    'content-available': 1, // Background notification
+                    'mutable-content': 1,
+                    alert: {
+                        title: 'Входящий звонок',
+                        body: isVideoCall ? 'Видеовызов' : 'Аудиовызов'
+                    }
                 }
             }
         }
@@ -210,7 +214,6 @@ app.post('/api/send-call', async (req, res) => {
             res.status(503).json({
                 error: 'Notification Service Error',
                 message: 'Failed to send notification via FCM. Please try again later.',
-                // details: process.env.NODE_ENV === 'development' ? sendError.message : undefined
             });
         }
     }
@@ -227,30 +230,22 @@ app.all('*', (req, res) => {
 });
 
 // --- Global error handler middleware ---
-// Note: In serverless environments like Vercel, global error handlers might not catch all errors.
-// It's better to wrap async route handlers or use libraries like express-async-errors.
 app.use((err, req, res, next) => {
     console.error('Unhandled error caught by global middleware:', err);
-    // If headers haven't been sent yet, send an error response
     if (!res.headersSent) {
         res.status(500).json({
             error: 'Internal Server Error',
             message: 'An unexpected error occurred on the server.'
         });
     } else {
-        // If headers were already sent, delegate to default error handler
         next(err);
     }
 });
 
 // --- Export for Vercel Serverless Functions ---
-// Vercel expects a single default export for serverless functions.
-// However, since we're using Express with vercel.json pointing to this file,
-// we can still export the app. Vercel will handle it via @vercel/node builder.
 export default app;
 
 // --- For local development with `node api/index.js` ---
-// We need to start the server ourselves if this file is run directly.
 if (import.meta.url === `file://${process.argv[1]}`) {
     const PORT = process.env.PORT || 3000;
     app.listen(PORT, '0.0.0.0', () => {
